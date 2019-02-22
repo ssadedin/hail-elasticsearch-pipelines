@@ -58,9 +58,6 @@ def init_command_line_args():
     p.add_argument("--skip-vep", action="store_true", help="Don't run vep.")
     p.add_argument("--skip-annotations", action="store_true", help="Don't add any reference data. Intended for testing.")
     p.add_argument("--skip-validation", action="store_true", help="Don't validate --sample-type and --genome-version. Intended for testing.")
-    p.add_argument("--skip-writing-intermediate-vds", action="store_true", help="Skip creating intermediate checkpoints with "
-        "write-vds/shut-down-hail-context/restart-hail-context/read-vds cycles which are there to make the pipeline more robust against "
-        "crashes due to OOM or issues with preemtible dataproc nodes.")
     p.add_argument('--filter-interval', default="1-MT", help="Only load data in this genomic interval ('chrom1-chrom2' or 'chrom:start-end')")
 
     p.add_argument('--remap-sample-ids', help="Filepath containing 2 tab-separated columns: current sample id and desired sample id")
@@ -414,7 +411,7 @@ def step0_init_and_run_vep(hc, vds, args):
         vds = run_vep(vds, genome_version=args.genome_version, block_size=args.vep_block_size)
         vds = vds.annotate_global_expr('global.gencodeVersion = "{}"'.format("19" if args.genome_version == "37" else "25"))
 
-    if args.step0_output_vds != args.input_dataset.rstrip("/") and not args.skip_writing_intermediate_vds:
+    if args.step0_output_vds != args.input_dataset.rstrip("/"):
         write_vds(vds, args.step0_output_vds)
 
     if args.export_vcf:
@@ -432,10 +429,9 @@ def step1_compute_derived_fields(hc, vds, args):
 
     logger.info("\n\n=============================== pipeline - step 1 - compute derived fields ===============================")
 
-    if vds is None or not args.skip_writing_intermediate_vds:
-        stop_hail_context(hc)
-        hc = create_hail_context()
-        vds = read_in_dataset(hc, args.step0_output_vds, dataset_type=args.dataset_type, skip_summary=True, num_partitions=args.cpu_limit)
+    stop_hail_context(hc)
+    hc = create_hail_context()
+    vds = read_in_dataset(hc, args.step0_output_vds, dataset_type=args.dataset_type, skip_summary=True, num_partitions=args.cpu_limit)
 
     parallel_computed_annotation_exprs = [
         "va.docId = %s" % get_expr_for_variant_id(512),
@@ -604,8 +600,7 @@ def step1_compute_derived_fields(hc, vds, args):
     vds = vds.annotate_variants_expr(expr=expr)
     vds = vds.annotate_variants_expr("va = va.clean")
 
-    if not args.skip_writing_intermediate_vds:
-        write_vds(vds, args.step1_output_vds)
+    write_vds(vds, args.step1_output_vds)
 
     args.start_with_step = 2  # step 1 finished, so, if an error occurs and it goes to retry, start with the next step
 
@@ -618,10 +613,9 @@ def step2_export_to_elasticsearch(hc, vds, args):
 
     logger.info("\n\n=============================== pipeline - step 2 - export to elasticsearch ===============================")
 
-    if vds is None or not args.skip_writing_intermediate_vds:
-        stop_hail_context(hc)
-        hc = create_hail_context()
-        vds = read_in_dataset(hc, args.step1_output_vds, dataset_type=args.dataset_type, skip_summary=True, num_partitions=args.cpu_limit)
+    stop_hail_context(hc)
+    hc = create_hail_context()
+    vds = read_in_dataset(hc, args.step1_output_vds, dataset_type=args.dataset_type, skip_summary=True, num_partitions=args.cpu_limit)
 
     export_to_elasticsearch(
         vds,
@@ -645,10 +639,9 @@ def step3_add_reference_datasets(hc, vds, args):
 
     logger.info("\n\n=============================== pipeline - step 3 - add reference datasets ===============================")
 
-    if vds is None or not args.skip_writing_intermediate_vds:
-        stop_hail_context(hc)
-        hc = create_hail_context()
-        vds = read_in_dataset(hc, args.step1_output_vds, dataset_type=args.dataset_type, skip_summary=True)
+    stop_hail_context(hc)
+    hc = create_hail_context()
+    vds = read_in_dataset(hc, args.step1_output_vds, dataset_type=args.dataset_type, skip_summary=True)
 
     if not args.only_export_to_elasticsearch_at_the_end:
 
@@ -720,7 +713,7 @@ def step3_add_reference_datasets(hc, vds, args):
         logger.info("\n==> add hgmd")
         vds = add_hgmd_to_vds(hc, vds, args.genome_version, root="va.hgmd", subset=args.filter_interval)
 
-    if not args.is_running_locally and not args.skip_writing_intermediate_vds:
+    if not args.is_running_locally:
         write_vds(vds, args.step3_output_vds)
 
     args.start_with_step = 4   # step 3 finished, so, if an error occurs and it goes to retry, start with the next step
@@ -734,7 +727,7 @@ def step4_export_to_elasticsearch(hc, vds, args):
 
     logger.info("\n\n=============================== pipeline - step 4 - export to elasticsearch ===============================")
 
-    if vds is None or (not args.is_running_locally and not args.skip_writing_intermediate_vds):
+    if not args.is_running_locally:
         stop_hail_context(hc)
         hc = create_hail_context()
         vds = read_in_dataset(hc, args.step3_output_vds, dataset_type=args.dataset_type, skip_summary=True, num_partitions=args.cpu_limit)
