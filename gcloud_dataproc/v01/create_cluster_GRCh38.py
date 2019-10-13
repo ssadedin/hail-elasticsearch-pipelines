@@ -4,6 +4,7 @@ import argparse
 import os
 
 from gcloud_dataproc.utils.machine_types import MACHINE_TYPES, get_cost
+import sys
 
 p = argparse.ArgumentParser()
 p.add_argument("-m", "--machine-type", default="n1-highmem-8", choices=MACHINE_TYPES)
@@ -42,5 +43,5 @@ command = """gcloud beta dataproc clusters create %(cluster)s \
 
 
 print(command)
-os.system(command)
+sys.exit(os.system(command))
 
